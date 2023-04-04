@@ -12,7 +12,8 @@ const
 let
 	source = argv.source,
 	dest = argv.dest,
-	method = 'copy';
+	method = 'copy',
+	type = null;
 // strip colours if you or your computer sucks
 const log = (str) => {
 	if (leeks.supportsColour) {
@@ -21,26 +22,34 @@ const log = (str) => {
 		console.log(str.replace(/\u001b\[.*?m/g, ''));
 	}
 }
-const getAllFiles = (dir, filesArray) => {
+const getAllFiles = (dir, filesArray, type) => {
 	files = fs.readdirSync(dir);
 	filesArray = filesArray || [];
 
 	files.forEach(file => {
 		if (fs.statSync(dir + "/" + file).isDirectory()) {
-			filesArray = getAllFiles(dir + "/" + file, filesArray);
+			filesArray = getAllFiles(dir + "/" + file, filesArray, type);
 		} else {
-			let abs = path.join(dir, "/", file);
-			filesArray.push(abs);
+			if(file != '.DS_Store') {
+				let abs = path.join(dir, "/", file);
+				if(type) {
+					if(file.endsWith(type)) {
+						filesArray.push(abs);
+					}
+				}else {
+					filesArray.push(abs);
+				}
+			}
 		}
 	});
 
 	return filesArray;
 }
 
-const run = (src, dest, method) => {
+const run = (src, dest, method, type) => {
 	let mc = method === 'copy' ? 0 : 1;
 	let scanner = ora('Scanning source directory and sub directories for photos').start();
-	let images = getAllFiles(src);
+	let images = getAllFiles(src, null, type);
 	scanner.succeed(`Found ${c.cyan(images.length)} files`);
 
 	let progress = new ProgressBar(`  ${mc === 0 ? 'Copied' : 'Moved'} :current/:total files [:bar] :percent (:rate files/s, :etas remaing): :file`, {
@@ -52,7 +61,9 @@ const run = (src, dest, method) => {
 
 	images.forEach(i => {
 		let
-			mod = new Date(fs.statSync(i).mtime),
+			stat = fs.statSync(i),
+			time = stat.birthtime,
+			mod = new Date(time),
 			year = mod.getFullYear(),
 			month = ('0' + (mod.getMonth() + 1)).slice(-2),
 			dir = `${dest}/${year}/${month}`,
@@ -64,7 +75,9 @@ const run = (src, dest, method) => {
 		if (mc === 0) {
 			fs.copyFileSync(i, dir + '/' + name);
 		} else {
-			fs.renameSync(i, dir + '/' + name)
+			fs.renameSync(i, dir + '/' + name, function(err,data){
+                if(err) console.log(err)
+			})
 		}
 		progress.tick({
 			file: name
@@ -77,6 +90,10 @@ const run = (src, dest, method) => {
 
 if (argv.move) {
 	method = 'move';
+}
+
+if (argv.type) {
+	type = argv.type;
 }
 
 if (source || dest) {
@@ -104,7 +121,7 @@ if (source || dest) {
 		return log(c.redBright(`\n==============================\nFAILED: There were 1 or more issues. Perhaps you should use the interactive CLI?\n==============================\n`))
 	}
 
-	run(source, dest, method); // do it
+	run(source, dest, method, type); // do it
 
 } else {
 	// interactive
@@ -112,6 +129,10 @@ if (source || dest) {
 	log(c.bgYellowBright(c.black('\nNOTICE: You won\'t be able to submit a source or destination path if the directory does not exist! Create the destination directory before starting.\n')))
 	inquirer
 		.prompt([{
+				type: 'input',
+				name: 'type',
+				message: 'Wich type do you want to use?'
+			},{
 				type: 'list',
 				name: 'method',
 				message: 'Which method do you want to use?',
@@ -145,7 +166,8 @@ if (source || dest) {
 			let {
 				source,
 				dest,
-				method
+				method,
+				type
 			} = res;
 			log(`This will ${c.green(method.toUpperCase())} ${c.whiteBright('and sort images from')} ${c.blackBright(source)} ${c.whiteBright('to')} ${c.blackBright(dest)}`)
 			inquirer
@@ -156,7 +178,7 @@ if (source || dest) {
 				}])
 				.then(ans => {
 					if (ans.confirm) {
-						run(source, dest, method);
+						run(source, dest, method, type);
 					} else {
 						process.exit();
 					}

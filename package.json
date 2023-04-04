@@ -1,7 +1,7 @@
 {
-  "name": "@eartharoid/photosorter",
+  "name": "@clndl/filesorter",
   "version": "1.0.0",
-  "description": "Sort your photos into an intuitive directory structure, ordered by date",
+  "description": "Sort your files into an intuitive directory structure, ordered by date",
   "main": "index.js",
   "scripts": {
     "start": "node .",
@@ -9,14 +9,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/eartharoid/photosorter.git"
+    "url": "git+https://github.com/clndl/filesorter.git"
   },
-  "author": "eartharoid",
+  "author": "clndl",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/eartharoid/photosorter/issues"
+    "url": "https://github.com/clndl/filesorter/issues"
   },
-  "homepage": "https://github.com/eartharoid/photosorter#readme",
+  "homepage": "https://github.com/clndl/filesorter#readme",
   "dependencies": {
     "inquirer": "^7.1.0",
     "leeks.js": "0.0.8",
