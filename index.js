@@ -3,194 +3,188 @@
 const
 	fs = require('fs'),
 	path = require('path'),
-	leeks = require('leeks.js'),
 	ora = require('ora'),
 	inquirer = require('inquirer'),
-	argv = require('minimist')(process.argv.slice(2)),
-	ProgressBar = require('progress'),
-	c = leeks.colours;
-let
-	source = argv.source,
-	dest = argv.dest,
-	method = 'copy',
-	type = null;
-// strip colours if you or your computer sucks
-const log = (str) => {
-	if (leeks.supportsColour) {
-		console.log(str);
-	} else {
-		console.log(str.replace(/\u001b\[.*?m/g, ''));
-	}
-}
-const getAllFiles = (dir, filesArray, type) => {
-	files = fs.readdirSync(dir);
+	ProgressBar = require('progress');
+
+const getAllFiles = (dir, type, filesArray) => {
 	filesArray = filesArray || [];
 
-	files.forEach(file => {
-		if (fs.statSync(dir + "/" + file).isDirectory()) {
-			filesArray = getAllFiles(dir + "/" + file, filesArray, type);
-		} else {
-			if(file != '.DS_Store') {
-				let abs = path.join(dir, "/", file);
-				if(type) {
-					if(file.endsWith(type)) {
-						filesArray.push(abs);
-					}
-				}else {
+	const shouldSearch = type !== path.basename(dir);
+
+	if (shouldSearch) {
+		const files = fs.readdirSync(dir);
+
+		files.forEach(file => {
+			const abs = path.join(dir, file);
+
+			if (fs.statSync(abs).isDirectory()) {
+				filesArray = getAllFiles(abs, type, filesArray);
+			} else {
+				if (file !== '.DS_Store' && (!type || file.endsWith(type))) {
 					filesArray.push(abs);
 				}
 			}
-		}
-	});
+		});
+	} else {
+		// Push the directory itself if it matches
+		filesArray.push(dir);
+	}
 
 	return filesArray;
+};
+
+const moveFileWithUniqueName = function(sourcePath, destinationPath) {
+	let counter = 0;
+	let newDestinationPath = destinationPath;
+
+	while (fs.existsSync(newDestinationPath)) {
+		counter++;
+		const fileExtension = path.extname(destinationPath);
+		const baseName = path.basename(destinationPath, fileExtension);
+		newDestinationPath = path.join(path.dirname(destinationPath), `${baseName}_${counter}${fileExtension}`);
+	}
+
+	fs.renameSync(sourcePath, newDestinationPath, function(err){
+		if(err) console.log(err)
+	})
+	console.log(`File "${sourcePath}" has been moved to "${newDestinationPath}".`);
 }
 
 const run = (src, dest, method, type) => {
-	let mc = method === 'copy' ? 0 : 1;
-	let scanner = ora('Scanning source directory and sub directories for photos').start();
-	let images = getAllFiles(src, null, type);
-	scanner.succeed(`Found ${c.cyan(images.length)} files`);
+	let scanner = ora('Scanning source directory and sub directories').start();
+	let items = getAllFiles(src, type);
+	scanner.succeed(`Found ${items.length} items`);
 
-	let progress = new ProgressBar(`  ${mc === 0 ? 'Copied' : 'Moved'} :current/:total files [:bar] :percent (:rate files/s, :etas remaing): :file`, {
-		complete: '=',
-		incomplete: ' ',
-		width: 20,
-		total: images.length
-	});
+	if(items.length) {
+		items.forEach(f => console.log(f))
 
-	images.forEach(i => {
-		let
-			stat = fs.statSync(i),
-			time = stat.birthtime,
-			mod = new Date(time),
-			year = mod.getFullYear(),
-			month = ('0' + (mod.getMonth() + 1)).slice(-2),
-			dir = `${dest}/${year}/${month}`,
-			name = i.replace(/^.*[\\\/]/, '');
+		inquirer
+			.prompt([{
+				type: 'confirm',
+				name: 'confirm',
+				message: 'Do you want to continue?'
+			}])
+			.then(ans => {
+				if (ans.confirm) {
+					let progress = new ProgressBar(`  ${method.toUpperCase()} :current/:total files [:bar] :percent (:rate files/s, :etas remaing): :file`, {
+						complete: '=',
+						incomplete: ' ',
+						width: 20,
+						total: items.length
+					});
 
-		if (!fs.existsSync(`${dest}/${year}`)) fs.mkdirSync(`${dest}/${year}`); // make year dir
-		if (!fs.existsSync(dir)) fs.mkdirSync(dir); // make month dir
+					items.forEach(item => {
+						let
+							stat = fs.statSync(item),
+							ext = path.extname(item),
+							dirname = path.dirname(item),
+							time = stat.birthtime,
+							mod = new Date(time),
+							year = mod.getFullYear(),
+							month = ('0' + (mod.getMonth() + 1)).slice(-2),
+							day = mod.getDate(),
+							hours = mod.getUTCHours(),
+							minutes = mod.getUTCMinutes(),
+							tmp = `${dest}/${year}/${month}`,
+							name = item.replace(/^.*[\\\/]/, '');
 
-		if (mc === 0) {
-			fs.copyFileSync(i, dir + '/' + name);
-		} else {
-			fs.renameSync(i, dir + '/' + name, function(err,data){
-                if(err) console.log(err)
+
+						if(method === 'rename' ){
+							let newName = `${year}-${month}-${day}-${hours}-${minutes}${ext}`
+							moveFileWithUniqueName(item, dirname + '/' + newName)
+						}else if(method === 'remove'){
+							fs.rm(item, { recursive: true, force: true }, (err) => {
+								if(err) {
+									console.error(`Error removing directory ${item}: ${err}`);
+								}else {
+									console.log(`Removed directory ${item}`);
+								}
+							});
+						}else {
+							if (!fs.existsSync(`${dest}/${year}`)) fs.mkdirSync(`${dest}/${year}`); // make year dir
+							if (!fs.existsSync(tmp)) fs.mkdirSync(tmp); // make month dir
+
+							if (method === 'copy') {
+								fs.copyFileSync(item, tmp + '/' + name);
+							}else if(method === 'move') {
+								fs.renameSync(item, tmp + '/' + name, function(err,data){
+									if(err) console.log(err)
+								})
+							}
+						}
+						progress.tick({
+							file: item
+						});
+					})
+				} else {
+					process.exit();
+				}
 			})
+	}else {
+		process.exit();
+	}
+}
+
+inquirer
+	.prompt([{
+			type: 'input',
+			name: 'type',
+			message: 'Wich type of file or directory do you want to find?'
+		},{
+			type: 'list',
+			name: 'method',
+			message: 'Which method do you want to use?',
+			choices: [
+				{
+					name: 'Copy and sort files by date to new directory',
+					value: 'copy',
+				},
+				{
+					name: 'Move and sort files by date to new directory',
+					value: 'move',
+				},
+				{
+					name: 'Rename files by birthday',
+					value: 'rename',
+				},
+				{
+					name: 'Remove nested directory',
+					value: 'remove',
+				},
+			]
+		},
+		{
+			type: 'input',
+			name: 'source',
+			default: '.',
+			message: 'Source directory path:',
+			validate: val => fs.existsSync(val)
+		},
+		{
+			type: 'input',
+			name: 'dest',
+			default: '.',
+			message: 'Destination directory path:',
+			validate: val => fs.existsSync(val)
 		}
-		progress.tick({
-			file: name
-		});
+	])
+	.then(res => {
+		let {
+			source,
+			dest,
+			method,
+			type
+		} = res;
+		run(source, dest, method, type);
 	})
-
-	// log(`Preparing to sort and ${method.toUpperCase()} ${c.cyan(images.length)} files to ${c.blackBright(dest)}`)
-
-}
-
-if (argv.move) {
-	method = 'move';
-}
-
-if (argv.type) {
-	type = argv.type;
-}
-
-if (source || dest) {
-	// non-interactive
-
-	log(c.magentaBright('Command arguments supplied - skipping interactive interface,'));
-	let fail = false;
-
-	let sourceCheck = ora('Checking desintation');
-	if (!source || !fs.existsSync(source)) {
-		sourceCheck.fail(c.redBright('Source directory not specified or does not exist'));
-		fail = true;
-	} else {
-		sourceCheck.succeed(c.greenBright('Source directory exists'));
-	}
-	let destCheck = ora('Checking desintation');
-	if (!dest || !fs.existsSync(dest)) {
-		destCheck.fail(c.redBright('Destination directory not specified or does not exist'))
-		fail = true;
-	} else {
-		destCheck.succeed(c.greenBright('Destination directory exists'));
-	}
-
-	if (fail) {
-		return log(c.redBright(`\n==============================\nFAILED: There were 1 or more issues. Perhaps you should use the interactive CLI?\n==============================\n`))
-	}
-
-	run(source, dest, method, type); // do it
-
-} else {
-	// interactive
-	log(c.magentaBright('Entering interactive interface'));
-	log(c.bgYellowBright(c.black('\nNOTICE: You won\'t be able to submit a source or destination path if the directory does not exist! Create the destination directory before starting.\n')))
-	inquirer
-		.prompt([{
-				type: 'input',
-				name: 'type',
-				message: 'Wich type do you want to use?'
-			},{
-				type: 'list',
-				name: 'method',
-				message: 'Which method do you want to use?',
-				choices: [{
-						name: 'Copy to destination',
-						value: 'copy',
-					},
-					{
-						name: 'Move to destination',
-						value: 'move',
-					}
-				]
-			},
-			{
-				type: 'input',
-				name: 'source',
-				message: 'Source directory path:',
-				validate: val => fs.existsSync(val)
-			},
-			{
-				type: 'input',
-				name: 'dest',
-				message: 'Destination directory path:',
-				validate: val => fs.existsSync(val)
-			}
-		])
-		.then(res => {
-			// source = res.source;
-			// dest = res.dest;
-			// method = res.method;
-			let {
-				source,
-				dest,
-				method,
-				type
-			} = res;
-			log(`This will ${c.green(method.toUpperCase())} ${c.whiteBright('and sort images from')} ${c.blackBright(source)} ${c.whiteBright('to')} ${c.blackBright(dest)}`)
-			inquirer
-				.prompt([{
-					type: 'confirm',
-					name: 'confirm',
-					message: 'Do you want to continue?'
-				}])
-				.then(ans => {
-					if (ans.confirm) {
-						run(source, dest, method, type);
-					} else {
-						process.exit();
-					}
-				})
-		})
-		.catch(err => {
-			if (err.isTtyError) {
-				// Prompt couldn't be rendered in the current environment
-				log(c.redBright('ERROR: Interactive interface couldn\'t be loaded, try using the basic method (single command with options).'));
-			} else {
-				// Something else when wrong
-				log(c.redBright('An error occured'))
-			}
-		})
-}
+	.catch(err => {
+		if (err.isTtyError) {
+			// Prompt couldn't be rendered in the current environment
+			console.error('ERROR: Interactive interface couldn\'t be loaded, try using the basic method (single command with options).');
+		} else {
+			// Something else when wrong
+			console.error('An error occured');
+		}
+		process.exit();
+	})
